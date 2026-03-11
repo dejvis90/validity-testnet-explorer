@@ -1,5 +1,3 @@
-# validity-testnet-explorer
-Block explorer for the Validity testnet
 # Validity Testnet Explorer
 
 Simple RPC-based block explorer.

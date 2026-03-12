@@ -40,3 +40,29 @@ sudo apt remove nodejs
 curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
 
 sudo apt-get install -y nodejs
+
+## Install Maria db
+
+sudo apt install mariadb-server mariadb-client -y
+
+sudo systemctl start mariadb
+sudo systemctl enable mariadb
+
+sudo mysql_secure_installation
+
+-- Login as root
+mysql -u root -p
+
+-- Create a database for the explorer
+CREATE DATABASE testnet_explorer;
+
+-- Create a user for the explorer
+CREATE USER 'explorer'@'localhost' IDENTIFIED BY 'yourpassword';
+
+-- Grant privileges
+GRANT ALL PRIVILEGES ON testnet_explorer.* TO 'explorer'@'localhost';
+
+-- Apply changes
+FLUSH PRIVILEGES;
+EXIT;
+

@@ -84,3 +84,9 @@ EXIT;
   "coin": "Validity Testnet",
   "symbol": "VLD"
 }
+"social": {
+  "twitter": "",
+  "facebook": "",
+  "telegram": "",
+  "discord": ""
+}

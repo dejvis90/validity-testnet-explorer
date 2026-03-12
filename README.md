@@ -66,3 +66,21 @@ GRANT ALL PRIVILEGES ON testnet_explorer.* TO 'explorer'@'localhost';
 FLUSH PRIVILEGES;
 EXIT;
 
+{
+  "rpcuser": "YOUR_RPCUSER",
+  "rpcpassword": "YOUR_RPCPASSWORD",
+  "rpchost": "127.0.0.1",
+  "rpcport": 19332,
+  "network": "testnet",
+
+  "dbhost": "localhost",
+  "dbuser": "explorer",
+  "dbpassword": "yourpassword",
+  "dbname": "testnet_explorer",
+  "dbport": 3306,
+
+  "port": 3000,
+  "disableemails": true,
+  "coin": "Validity Testnet",
+  "symbol": "VLD"
+}

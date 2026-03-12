@@ -36,5 +36,7 @@ http://localhost:3000
 Node needs to be atleast v19
 If you are using older node (check with node -v),use:
 sudo apt remove nodejs
+
 curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+
 sudo apt-get install -y nodejs

@@ -55,24 +55,26 @@ async function syncBlocks() {
     }
     console.log("Sync complete");
 }
-async function rpc(method, params = []) {
-  const res = await axios.post(
-    `http://${config.rpchost}:${config.rpcport}`,
-    {
-      jsonrpc: "1.0",
-      id: "explorer",
-      method,
-      params
-    },
-    {
-      auth: {
-        username: config.rpcuser,
-        password: config.rpcpassword
-      }
-    }
-  );
+const axios = require('axios');
 
-  return res.data.result;
+const rpcUser = "rpcuser";
+const rpcPassword = "rpcpassword";
+const rpcPort = 19702; // replace with your testnet RPC port
+const rpcUrl = `http://127.0.0.1:${rpcPort}`;
+
+async function rpcCall(method, params = []) {
+    const data = {
+        jsonrpc: "1.0",
+        id: "explorer",
+        method,
+        params
+    };
+    const auth = {
+        username: rpcUser,
+        password: rpcPassword
+    };
+    const response = await axios.post(rpcUrl, data, { auth });
+    return response.data.result;
 }
 
 app.get("/", async (req, res) => {

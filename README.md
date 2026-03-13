@@ -78,45 +78,4 @@ EXIT;
   "dbpassword": "yourpassword",
   "dbname": "testnet_explorer",
   "dbport": 3306,
-
-  "port": 3000,
-  "disableemails": true,
-  "coin": "Validity Testnet",
-  "symbol": "VLD"
 }
-"social": {
-  "twitter": "",
-  "facebook": "",
-  "telegram": "",
-  "discord": ""
-}
-
-sudo apt install gnupg curl -y
-
-curl -fsSL https://pgp.mongodb.com/server-7.0.asc | \
-sudo gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg \
---dearmor
-
-echo "deb [signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
-
-sudo apt update
-
-sudo apt install mongodb-org -y
-
-sudo rm /etc/apt/sources.list.d/mongodb-org-7.0.list
-sudo rm /usr/share/keyrings/mongodb-server-7.0.gpg
-
-curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
-
-echo "deb [signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/7.0 multiverse" | \
-sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
-
-
-db.createUser({
-  user: "explorer",
-  pwd: "StrongPassword123",
-  roles: [ { role: "readWrite", db: "testnet_explorer" } ]
-})
-
-
-db.blocks.insertOne({ height: 0, hash: "genesis" })

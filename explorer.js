@@ -25,7 +25,36 @@ db.connect(err => {
         console.log('Connected to MariaDB successfully.');
     }
 });
+async function syncBlocks() {
+    const lastRow = await db.promise().query(
+        "SELECT MAX(height) as height FROM blocks"
+    );
+    let lastHeight = lastRow[0][0].height || 0;
 
+    const chainHeight = await rpcCall("getblockcount");
+
+    console.log(`Syncing from ${lastHeight + 1} to ${chainHeight}`);
+
+    for (let height = lastHeight + 1; height <= chainHeight; height++) {
+        const blockHash = await rpcCall("getblockhash", [height]);
+        const block = await rpcCall("getblock", [blockHash, 2]); // verbosity 2 includes txs
+
+        // Insert block
+        await db.promise().query(
+            "INSERT INTO blocks (height, hash, time) VALUES (?, ?, ?)",
+            [block.height, block.hash, new Date(block.time * 1000)]
+        );
+
+        // Insert transactions
+        for (const tx of block.tx) {
+            await db.promise().query(
+                "INSERT INTO transactions (txid, blockheight, time) VALUES (?, ?, ?)",
+                [tx.txid, block.height, new Date(block.time * 1000)]
+            );
+        }
+    }
+    console.log("Sync complete");
+}
 async function rpc(method, params = []) {
   const res = await axios.post(
     `http://${config.rpchost}:${config.rpcport}`,

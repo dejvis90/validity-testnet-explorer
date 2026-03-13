@@ -9,6 +9,23 @@ const config = JSON.parse(
   fs.readFileSync("./config/rpc.json")
 );
 
+const mysql = require('mysql2');
+
+const db = mysql.createConnection({
+    host: 'localhost',
+    user: 'user',
+    password: 'password',
+    database: 'dbname'
+});
+
+db.connect(err => {
+    if(err) {
+        console.error('DB connection failed:', err);
+    } else {
+        console.log('Connected to MariaDB successfully.');
+    }
+});
+
 async function rpc(method, params = []) {
   const res = await axios.post(
     `http://${config.rpchost}:${config.rpcport}`,

@@ -77,6 +77,8 @@ async function rpcCall(method, params = []) {
     const response = await axios.post(rpcUrl, data, { auth });
     return response.data.result;
 }
+const height = await rpcCall("getblockcount");
+console.log("Current chain height:", height);
 
 app.get("/", async (req, res) => {
   const height = await rpc("getblockcount");

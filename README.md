@@ -54,13 +54,13 @@ sudo mysql_secure_installation
 mysql -u root -p
 
 -- Create a database for the explorer
-CREATE DATABASE testnet_explorer;
+CREATE DATABASE db_name;
 
 -- Create a user for the explorer
-CREATE USER 'explorer'@'localhost' IDENTIFIED BY 'yourpassword';
+CREATE USER 'user'@'localhost' IDENTIFIED BY 'yourpassword';
 
 -- Grant privileges
-GRANT ALL PRIVILEGES ON testnet_explorer.* TO 'explorer'@'localhost';
+GRANT ALL PRIVILEGES ON db_name.* TO 'user'@'localhost';
 
 -- Apply changes
 FLUSH PRIVILEGES;
@@ -79,3 +79,22 @@ EXIT;
   "dbname": "testnet_explorer",
   "dbport": 3306,
 }
+
+USE testnet_explorer;
+
+CREATE TABLE blocks (
+    height BIGINT PRIMARY KEY,
+    hash VARCHAR(128),
+    time DATETIME
+);
+
+CREATE TABLE transactions (
+    txid VARCHAR(128) PRIMARY KEY,
+    blockheight BIGINT,
+    time DATETIME
+);
+
+CREATE TABLE addresses (
+    address VARCHAR(64) PRIMARY KEY,
+    balance DECIMAL(32,8)
+);

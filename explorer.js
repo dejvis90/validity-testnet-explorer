@@ -55,6 +55,7 @@ async function syncBlocks() {
     }
     console.log("Sync complete");
 }
+setInterval(syncBlocks, 10000); // check every 10 seconds
 const axios = require('axios');
 
 const rpcUser = "rpcuser";

@@ -117,3 +117,6 @@ db.createUser({
   pwd: "StrongPassword123",
   roles: [ { role: "readWrite", db: "testnet_explorer" } ]
 })
+
+
+db.blocks.insertOne({ height: 0, hash: "genesis" })

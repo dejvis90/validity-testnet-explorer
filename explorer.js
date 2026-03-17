@@ -191,6 +191,7 @@ app.get("/tx/:txid", async (req, res) => {
         );
 
         const blockHash = blockRows[0].hash;
+        console.log("Calling getrawtransaction with txid:", txid);
 
         // 3️⃣ Now call RPC (after blockHash exists)
         const tx = await rpcCall("getrawtransaction", [
@@ -209,7 +210,7 @@ app.get("/tx/:txid", async (req, res) => {
                 `);
         
             } catch (err) {
-                console.error(err);
+                console.error("RPC call failed:", err.response ? err.response.data : err.message);
                 res.send("Error fetching transaction");
             }
         });

@@ -132,6 +132,23 @@ app.get("/", async (req, res) => {
 app.post("/search", (req, res) => {
   res.redirect("/tx/" + req.body.query);
 });
+const [rows] = await db.promise().query(
+  "SELECT blockheight FROM transactions WHERE txid = ?",
+  [req.params.txid]
+);
+
+const txRow = rows[0];
+
+const [blockRows] = await db.promise().query(
+  "SELECT hash FROM blocks WHERE height = ?",
+  [txRow.blockheight]
+);
+
+const blockHash = blockRows[0].hash;
+const [tx] = await db.promise().query(
+  "SELECT * FROM transactions WHERE txid = ?",
+  [req.params.txid]
+);
 
 app.get("/block/:height", async (req, res) => {
   const height = parseInt(req.params.height);

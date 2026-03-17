@@ -198,26 +198,21 @@ app.get("/tx/:txid", async (req, res) => {
             true,
             blockHash
         ]);
-
-        res.json(tx);
-
-    } catch (err) {
-        console.error(err);
-        res.send("Error fetching transaction");
-    }
-});
-
-  res.send(`
-    <h1>Transaction</h1>
-
-    <p>${tx.txid}</p>
-
-    <pre>${JSON.stringify(tx, null, 2)}</pre>
-
-    <a href="/">Back</a>
-  `);
-});
-
+        res.send(`
+                    <h1>Transaction</h1>
+        
+                    <p>${tx.txid}</p>
+        
+                    <pre>${JSON.stringify(tx, null, 2)}</pre>
+        
+                    <a href="/">Back</a>
+                `);
+        
+            } catch (err) {
+                console.error(err);
+                res.send("Error fetching transaction");
+            }
+        });
 app.use(express.static("public"));
 
 app.listen(3000, () => {

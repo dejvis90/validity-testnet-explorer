@@ -171,17 +171,40 @@ app.get("/block/:height", async (req, res) => {
 });
 
 app.get("/tx/:txid", async (req, res) => {
-  const tx = await rpc("getrawtransaction", [req.params.txid, true]);
+    const txid = req.params.txid;
 
-  res.send(`
-    <h1>Transaction</h1>
+    try {
+        // 1️⃣ Get block height from DB
+        const [rows] = await db.promise().query(
+            "SELECT blockheight FROM transactions WHERE txid = ?",
+            [txid]
+        );
 
-    <p>${tx.txid}</p>
+        if (!rows.length) {
+            return res.send("Transaction not found");
+        }
 
-    <pre>${JSON.stringify(tx, null, 2)}</pre>
+        // 2️⃣ Get block hash
+        const [blockRows] = await db.promise().query(
+            "SELECT hash FROM blocks WHERE height = ?",
+            [rows[0].blockheight]
+        );
 
-    <a href="/">Back</a>
-  `);
+        const blockHash = blockRows[0].hash;
+
+        // 3️⃣ Now call RPC (after blockHash exists)
+        const tx = await rpcCall("getrawtransaction", [
+            txid,
+            true,
+            blockHash
+        ]);
+
+        res.json(tx);
+
+    } catch (err) {
+        console.error(err);
+        res.send("Error fetching transaction");
+    }
 });
 
 app.use(express.static("public"));

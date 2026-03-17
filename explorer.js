@@ -207,6 +207,17 @@ app.get("/tx/:txid", async (req, res) => {
     }
 });
 
+  res.send(`
+    <h1>Transaction</h1>
+
+    <p>${tx.txid}</p>
+
+    <pre>${JSON.stringify(tx, null, 2)}</pre>
+
+    <a href="/">Back</a>
+  `);
+});
+
 app.use(express.static("public"));
 
 app.listen(3000, () => {

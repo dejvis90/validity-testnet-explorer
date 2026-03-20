@@ -79,6 +79,28 @@ EXIT;
   "dbname": "testnet_explorer",
   "dbport": 3306,
 }
+#!/bin/bash
+
+# Your wallet address
+ADDR="tb1qYourAddressHere"
+
+# Number of blocks per iteration
+BLOCKS=1
+
+# Infinite loop (stop manually with Ctrl+C)
+while true; do
+    echo "Starting new iteration: generating $BLOCKS block(s)... $(date)"
+    
+    # Mine blocks
+    bitcoin-cli generatetoaddress $BLOCKS $ADDR
+
+    # Check wallet balance
+    BALANCE=$(bitcoin-cli getbalance)
+    echo "Iteration complete. Wallet balance: $BALANCE"
+    
+    # Optional pause between iterations (helps if node is busy)
+    sleep 0.5
+done
 
 USE testnet_explorer;
 

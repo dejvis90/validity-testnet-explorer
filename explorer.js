@@ -210,8 +210,7 @@ app.get("/tx/:txid", async (req, res) => {
     try {
       tx = await rpcCall("getrawtransaction", [
         txid,
-        1,
-        blockHash
+        1
       ]);
     } catch (rpcErr) {
       console.error("RPC ERROR:", rpcErr.response ? rpcErr.response.data : rpcErr.message);

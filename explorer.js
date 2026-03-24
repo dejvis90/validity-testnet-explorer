@@ -170,49 +170,75 @@ app.get("/block/:height", async (req, res) => {
   }
 });
 
-// Transaction page
 app.get("/tx/:txid", async (req, res) => {
   const txid = req.params.txid;
 
   try {
-    // Get block height from DB
+    console.log("Looking up TX:", txid);
+
+    // 1️⃣ Get block height from DB
     const [rows] = await db.promise().query(
       "SELECT blockheight FROM transactions WHERE txid = ?",
       [txid]
     );
 
     if (!rows.length) {
-      return res.send("Transaction not found");
+      console.log("TX not found in DB");
+      return res.send("Transaction not found in database");
     }
 
-    // Get block hash
+    const blockHeight = rows[0].blockheight;
+    console.log("Block height:", blockHeight);
+
+    // 2️⃣ Get block hash from DB
     const [blockRows] = await db.promise().query(
       "SELECT hash FROM blocks WHERE height = ?",
-      [rows[0].blockheight]
+      [blockHeight]
     );
 
+    if (!blockRows.length) {
+      console.log("Block not found for height:", blockHeight);
+      return res.send("Block not found in database");
+    }
+
     const blockHash = blockRows[0].hash;
+    console.log("Block hash:", blockHash);
 
-    // Fetch tx from daemon
-    const tx = await rpcCall("getrawtransaction", [
-      txid,
-      1,
-      blockHash
-    ]);
+    // 3️⃣ Fetch transaction from daemon
+    let tx;
 
+    try {
+      tx = await rpcCall("getrawtransaction", [
+        txid,
+        1,
+        blockHash
+      ]);
+    } catch (rpcErr) {
+      console.error("RPC ERROR:", rpcErr.response ? rpcErr.response.data : rpcErr.message);
+
+      return res.send(`
+        <h1>Transaction</h1>
+        <p>${txid}</p>
+        <p>Transaction exists in DB but RPC fetch failed.</p>
+        <a href="/">Back</a>
+      `);
+    }
+
+    // 4️⃣ Render result
     res.send(`
       <h1>Transaction</h1>
-      <p>${tx.txid}</p>
+      <p><b>TXID:</b> ${tx.txid}</p>
+
       <pre>${JSON.stringify(tx, null, 2)}</pre>
+
       <a href="/">Back</a>
     `);
 
   } catch (err) {
-    console.error("TX ERROR:", err.response ? err.response.data : err.message);
+    console.error("TX ROUTE ERROR:", err);
     res.send("Error fetching transaction");
   }
 });
-
 // Static files
 app.use(express.static("public"));
 

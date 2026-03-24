@@ -98,60 +98,20 @@ async function syncBlocks() {
                 [tx, block.height, new Date(block.time * 1000)]
             );
         }
-        const [rows] = await db.promise().query(
-
-
-
-	  "SELECT blockheight FROM transactions WHERE txid = ?",
-
-
-	  [req.params.txid]
-
-
-	);
-
-
-
-
-
 	const txRow = rows[0];
-
-
-
-
-
 	const [blockRows] = await db.promise().query(
-
-
 	  "SELECT hash FROM blocks WHERE height = ?",
-
-
 	  [txRow.blockheight]
-
-
 	);
-
-
-
-
 
 	blockHash = blockRows[0].hash;
-
-
 	const [tx] = await db.promise().query(
-
-
 	  "SELECT * FROM transactions WHERE txid = ?",
-
-
 	  [req.params.txid]
-
-
 	);
     }
     console.log("Sync complete");
 }
-
 
 app.get("/", async (req, res) => {
   const height = await rpc("getblockcount");
@@ -230,8 +190,6 @@ app.get("/tx/:txid", async (req, res) => {
 
     const txid = req.params.txid;
 
-
-
     try {
 
         // 1️⃣ Get block height from DB
@@ -252,8 +210,6 @@ app.get("/tx/:txid", async (req, res) => {
 
         }
 
-
-
         // 2️⃣ Get block hash
 
         const [blockRows] = await db.promise().query(
@@ -264,7 +220,17 @@ app.get("/tx/:txid", async (req, res) => {
 
         );
 
+		const [rows] = await db.promise().query(
 
+
+
+	  "SELECT blockheight FROM transactions WHERE txid = ?",
+
+
+	  [req.params.txid]
+
+
+	  );
 
         const blockHash = blockRows[0].hash;
         console.log("Calling getrawtransaction with txid:", txid);

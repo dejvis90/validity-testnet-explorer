@@ -172,70 +172,71 @@ app.get("/tx/:txid", async (req, res) => {
   const txid = req.params.txid;
 
   try {
-    console.log("Looking up TX:", txid);
-
-    // 1️⃣ Get block height from DB
+    // Get block height
     const [rows] = await db.promise().query(
       "SELECT blockheight FROM transactions WHERE txid = ?",
       [txid]
     );
 
     if (!rows.length) {
-      console.log("TX not found in DB");
-      return res.send("Transaction not found in database");
+      return res.send("Transaction not found");
     }
 
     const blockHeight = rows[0].blockheight;
-    console.log("Block height:", blockHeight);
 
-    // 2️⃣ Get block hash from DB
-    const [blockRows] = await db.promise().query(
-      "SELECT hash FROM blocks WHERE height = ?",
-      [blockHeight]
-    );
+    // Get current height → confirmations
+    const currentHeight = await rpcCall("getblockcount");
+    const confirmations = currentHeight - blockHeight + 1;
 
-    if (!blockRows.length) {
-      console.log("Block not found for height:", blockHeight);
-      return res.send("Block not found in database");
+    // Get tx details
+    const tx = await rpcCall("getrawtransaction", [txid, 1]);
+
+    // Total output
+    let totalOut = 0;
+    for (const vout of tx.vout) {
+      totalOut += vout.value;
     }
 
-    const blockHash = blockRows[0].hash;
-    console.log("Block hash:", blockHash);
+    // Coinbase check
+    const isCoinbase = tx.vin[0].coinbase !== undefined;
 
-    // 3️⃣ Fetch transaction from daemon
-    let tx;
+    // Basic stake detection (may vary)
+    const isStake = tx.vin.length > 0 && !tx.vin[0].txid;
 
-    try {
-      tx = await rpcCall("getrawtransaction", [
-        txid,
-        1
-      ]);
-    } catch (rpcErr) {
-      console.error("RPC ERROR:", rpcErr.response ? rpcErr.response.data : rpcErr.message);
+    // Time (fallback if not in tx)
+    const blockHash = tx.blockhash;
+    const block = await rpcCall("getblock", [blockHash]);
+    const time = new Date(block.time * 1000).toLocaleString();
 
-      return res.send(`
-        <h1>Transaction</h1>
-        <p>${txid}</p>
-        <p>Transaction exists in DB but RPC fetch failed.</p>
-        <a href="/">Back</a>
-      `);
-    }
-
-    // 4️⃣ Render result
     res.send(`
       <h1>Transaction</h1>
-      <p><b>TXID:</b> ${tx.txid}</p>
 
-      <pre>${JSON.stringify(tx, null, 2)}</pre>
+      <p><b>TXID:</b> ${tx.txid}</p>
+      <p><b>Amount:</b> ${totalOut}</p>
+      <p><b>Confirmations:</b> ${confirmations}</p>
+      <p><b>Date:</b> ${time}</p>
+      <p><b>Type:</b> ${
+        isCoinbase ? "Mined (Coinbase)" :
+        isStake ? "Staked" :
+        "Normal Transaction"
+      }</p>
+
+      <h3>Outputs</h3>
+      <ul>
+        ${tx.vout.map(v => `
+          <li>${v.value} → ${v.scriptPubKey.addresses ? v.scriptPubKey.addresses.join(", ") : "N/A"}</li>
+        `).join("")}
+      </ul>
 
       <a href="/">Back</a>
     `);
 
   } catch (err) {
-    console.error("TX ROUTE ERROR:", err);
+    console.error("TX ERROR:", err.response ? err.response.data : err.message);
     res.send("Error fetching transaction");
   }
 });
+
 // Static files
 app.use(express.static("public"));
 

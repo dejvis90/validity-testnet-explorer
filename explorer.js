@@ -92,52 +92,60 @@ app.get("/", async (req, res) => {
     const limit = 1000;
     const offset = (page - 1) * limit;
 
-    // Get blocks from DB
+    // Get blocks and transaction counts + total outputs
     const [blocks] = await db.promise().query(
-      "SELECT * FROM blocks ORDER BY height DESC LIMIT ? OFFSET ?",
+      `SELECT b.*, COUNT(t.txid) as txcount, COALESCE(SUM(t.num_outputs), 0) as outputcount
+       FROM blocks b
+       LEFT JOIN transactions t ON b.height = t.blockheight
+       GROUP BY b.height
+       ORDER BY b.height DESC
+       LIMIT ? OFFSET ?`,
       [limit, offset]
     );
 
-    // Get total block count
+    // Total blocks for pagination
     const [countRows] = await db.promise().query(
       "SELECT COUNT(*) as count FROM blocks"
     );
-
     const totalBlocks = countRows[0].count;
     const totalPages = Math.ceil(totalBlocks / limit);
 
+    // Build table rows
     let rowsHtml = "";
-
     for (const block of blocks) {
       rowsHtml += `
         <tr>
-          <td>${block.height}</td>
-          <td><a href="/block/${block.height}">${block.hash}</a></td>
+          <td><a href="/block/${block.height}">${block.height}</a></td>
+          <td>${block.hash}</td>
+          <td>${block.txcount}</td>
+          <td>${block.outputcount}</td>
           <td>${new Date(block.time).toLocaleString()}</td>
         </tr>
       `;
     }
 
+    // Render HTML
     res.send(`
       <html>
       <head>
         <link rel="stylesheet" href="/style.css">
       </head>
       <body>
-
         <h1>Validity Testnet Explorer</h1>
 
         <form action="/search" method="post">
-          <input name="query" placeholder="txid">
+          <input name="query" placeholder="txid or block height">
           <button>Search</button>
         </form>
 
         <h2>Blocks (Page ${page} of ${totalPages})</h2>
 
-        <table>
+        <table border="1" cellpadding="5">
           <tr>
             <th>Height</th>
             <th>Hash</th>
+            <th>Transactions</th>
+            <th>Outputs</th>
             <th>Time</th>
           </tr>
           ${rowsHtml}
@@ -149,16 +157,21 @@ app.get("/", async (req, res) => {
           ${page < totalPages ? `<a href="/?page=${page + 1}">Next ➡</a>` : ""}
         </div>
 
+        <div style="margin-top:20px;">
+          <form method="get" action="/">
+            Jump to page: <input name="page" type="number" min="1" max="${totalPages}">
+            <button>Go</button>
+          </form>
+        </div>
       </body>
       </html>
     `);
 
   } catch (err) {
-    console.error(err);
+    console.error("Homepage error:", err);
     res.send("Error loading homepage");
   }
 });
-
 // Search
 app.post("/search", (req, res) => {
   res.redirect("/tx/" + req.body.query);

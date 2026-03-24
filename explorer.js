@@ -220,18 +220,6 @@ app.get("/tx/:txid", async (req, res) => {
 
         );
 
-		const [rows] = await db.promise().query(
-
-
-
-	  "SELECT blockheight FROM transactions WHERE txid = ?",
-
-
-	  [req.params.txid]
-
-
-	  );
-
         const blockHash = blockRows[0].hash;
         console.log("Calling getrawtransaction with txid:", txid);
 

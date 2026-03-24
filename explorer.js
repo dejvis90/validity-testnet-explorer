@@ -277,7 +277,7 @@ app.get("/tx/:txid", async (req, res) => {
 
             txid,
 
-            true
+            1
 
         ]);
         res.send(`

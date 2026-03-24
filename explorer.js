@@ -88,19 +88,32 @@ setInterval(syncBlocks, 10000);
 // Homepage
 app.get("/", async (req, res) => {
   try {
-    const height = await rpcCall("getblockcount");
+    const page = parseInt(req.query.page) || 1;
+    const limit = 1000;
+    const offset = (page - 1) * limit;
 
-    let blocks = "";
+    // Get blocks from DB
+    const [blocks] = await db.promise().query(
+      "SELECT * FROM blocks ORDER BY height DESC LIMIT ? OFFSET ?",
+      [limit, offset]
+    );
 
-    for (let i = height; i > height - 20 && i >= 0; i--) {
-      const hash = await rpcCall("getblockhash", [i]);
-      const block = await rpcCall("getblock", [hash]);
+    // Get total block count
+    const [countRows] = await db.promise().query(
+      "SELECT COUNT(*) as count FROM blocks"
+    );
 
-      blocks += `
+    const totalBlocks = countRows[0].count;
+    const totalPages = Math.ceil(totalBlocks / limit);
+
+    let rowsHtml = "";
+
+    for (const block of blocks) {
+      rowsHtml += `
         <tr>
-          <td>${i}</td>
-          <td><a href="/block/${i}">${block.hash}</a></td>
-          <td>${block.tx.length}</td>
+          <td>${block.height}</td>
+          <td><a href="/block/${block.height}">${block.hash}</a></td>
+          <td>${new Date(block.time).toLocaleString()}</td>
         </tr>
       `;
     }
@@ -111,6 +124,7 @@ app.get("/", async (req, res) => {
         <link rel="stylesheet" href="/style.css">
       </head>
       <body>
+
         <h1>Validity Testnet Explorer</h1>
 
         <form action="/search" method="post">
@@ -118,19 +132,27 @@ app.get("/", async (req, res) => {
           <button>Search</button>
         </form>
 
-        <h2>Latest Blocks</h2>
+        <h2>Blocks (Page ${page} of ${totalPages})</h2>
 
         <table>
           <tr>
             <th>Height</th>
             <th>Hash</th>
-            <th>Transactions</th>
+            <th>Time</th>
           </tr>
-          ${blocks}
+          ${rowsHtml}
         </table>
+
+        <div style="margin-top:20px;">
+          ${page > 1 ? `<a href="/?page=${page - 1}">⬅ Previous</a>` : ""}
+          &nbsp;&nbsp;
+          ${page < totalPages ? `<a href="/?page=${page + 1}">Next ➡</a>` : ""}
+        </div>
+
       </body>
       </html>
     `);
+
   } catch (err) {
     console.error(err);
     res.send("Error loading homepage");

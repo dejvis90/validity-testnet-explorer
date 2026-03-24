@@ -284,6 +284,56 @@ app.get("/address/:address", async (req, res) => {
   }
 });
 
+app.get("/richlist", async (req, res) => {
+  try {
+    // Aggregate balances per address
+    const [rows] = await db.promise().query(`
+      SELECT address, SUM(value) as balance
+      FROM vouts
+      GROUP BY address
+      ORDER BY balance DESC
+      LIMIT 100
+    `);
+
+    // Build table HTML
+    let html = "";
+    rows.forEach((row, index) => {
+      html += `
+        <tr>
+          <td>${index + 1}</td>
+          <td><a href="/address/${row.address}">${row.address}</a></td>
+          <td>${row.balance}</td>
+        </tr>
+      `;
+    });
+
+    // Render page
+    res.send(`
+      <html>
+      <head>
+        <link rel="stylesheet" href="/style.css">
+      </head>
+      <body>
+        <h1>Rich List (Top 100)</h1>
+        <table border="1" cellpadding="5">
+          <tr>
+            <th>Rank</th>
+            <th>Address</th>
+            <th>Balance</th>
+          </tr>
+          ${html}
+        </table>
+        <a href="/">Back</a>
+      </body>
+      </html>
+    `);
+
+  } catch (err) {
+    console.error("Richlist error:", err.message);
+    res.send("Error fetching rich list");
+  }
+});
+
 app.get("/tx/:txid", async (req, res) => {
   const txid = req.params.txid;
 

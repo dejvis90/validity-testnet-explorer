@@ -203,6 +203,70 @@ app.get("/block/:height", async (req, res) => {
   }
 });
 
+app.get("/address/:address", async (req, res) => {
+  const address = req.params.address;
+
+  try {
+    // 1️⃣ Get all UTXOs for this address
+    const utxos = await rpcCall("listunspent", [0, 9999999, [address]]);
+
+    // Calculate balance
+    const balance = utxos.reduce((sum, utxo) => sum + utxo.amount, 0);
+
+    // 2️⃣ Optionally, get all transactions involving this address from your DB
+    // This requires storing vouts/inputs in your DB during sync
+    const [txRows] = await db.promise().query(
+      `SELECT t.txid, t.blockheight, t.time
+       FROM transactions t
+       JOIN vouts v ON t.txid = v.txid
+       WHERE v.address = ?
+       ORDER BY t.time DESC`,
+      [address]
+    );
+
+    // 3️⃣ Build HTML table for transactions
+    let txHtml = "";
+    for (const tx of txRows) {
+      txHtml += `
+        <tr>
+          <td><a href="/tx/${tx.txid}">${tx.txid}</a></td>
+          <td>${tx.blockheight}</td>
+          <td>${new Date(tx.time).toLocaleString()}</td>
+        </tr>
+      `;
+    }
+
+    // 4️⃣ Render page
+    res.send(`
+      <html>
+      <head>
+        <link rel="stylesheet" href="/style.css">
+      </head>
+      <body>
+        <h1>Address: ${address}</h1>
+        <p>Balance: ${balance} COIN</p>
+
+        <h2>Transactions</h2>
+        <table border="1" cellpadding="5">
+          <tr>
+            <th>TxID</th>
+            <th>Block Height</th>
+            <th>Time</th>
+          </tr>
+          ${txHtml || "<tr><td colspan='3'>No transactions found</td></tr>"}
+        </table>
+
+        <a href="/">Back</a>
+      </body>
+      </html>
+    `);
+
+  } catch (err) {
+    console.error("Address error:", err.response ? err.response.data : err.message);
+    res.send("Error fetching address info");
+  }
+});
+
 app.get("/tx/:txid", async (req, res) => {
   const txid = req.params.txid;
 

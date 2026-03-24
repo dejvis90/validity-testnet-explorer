@@ -101,3 +101,12 @@ CREATE TABLE addresses (
 
 
 ALTER TABLE transactions ADD COLUMN num_outputs INT DEFAULT 0;
+
+
+CREATE TABLE vouts (
+  txid VARCHAR(64),
+  n INT,
+  address VARCHAR(128),
+  value DECIMAL(32,8),
+  PRIMARY KEY(txid, n)
+);

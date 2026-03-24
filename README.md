@@ -98,3 +98,6 @@ CREATE TABLE addresses (
     address VARCHAR(64) PRIMARY KEY,
     balance DECIMAL(32,8)
 );
+
+
+ALTER TABLE transactions ADD COLUMN num_outputs INT DEFAULT 0;

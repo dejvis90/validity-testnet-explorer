@@ -65,19 +65,30 @@ async function syncBlocks() {
         [block.height, block.hash, new Date(block.time * 1000)]
       );
 
-      for (const txid of block.tx) {
-    const txData = await rpcCall("getrawtransaction", [txid, 1]);
-    txData.vout.forEach((v, i) => {
+     // Insert transactions and their outputs
+    for (const txid of block.tx) {
+      const txData = await rpcCall("getrawtransaction", [txid, 1]);
+
+      // Insert transaction
+      await db.promise().query(
+        "INSERT IGNORE INTO transactions (txid, blockheight, time, num_outputs) VALUES (?, ?, ?, ?)",
+        [txid, block.height, new Date(block.time * 1000), txData.vout.length]
+      );
+
+      // Insert outputs into vouts table
+      for (let i = 0; i < txData.vout.length; i++) {
+        const v = txData.vout[i];
         if (v.scriptPubKey && v.scriptPubKey.addresses) {
-            v.scriptPubKey.addresses.forEach(addr => {
-                await db.promise().query(
-                  "INSERT IGNORE INTO vouts (txid, n, address, value) VALUES (?, ?, ?, ?)",
-                  [txid, i, addr, v.value]
-                );
-            });
+          for (const addr of v.scriptPubKey.addresses) {
+            await db.promise().query(
+              "INSERT IGNORE INTO vouts (txid, n, address, value) VALUES (?, ?, ?, ?)",
+              [txid, i, addr, v.value]
+            );
+          }
         }
-    });
-}
+      }
+    }
+
 
       console.log("Synced block", height);
     }

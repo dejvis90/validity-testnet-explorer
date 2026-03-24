@@ -65,13 +65,19 @@ async function syncBlocks() {
         [block.height, block.hash, new Date(block.time * 1000)]
       );
 
-      // Insert transactions
       for (const txid of block.tx) {
-        await db.promise().query(
-          "INSERT IGNORE INTO transactions (txid, blockheight, time) VALUES (?, ?, ?)",
-          [txid, block.height, new Date(block.time * 1000)]
-        );
-      }
+    const txData = await rpcCall("getrawtransaction", [txid, 1]);
+    txData.vout.forEach((v, i) => {
+        if (v.scriptPubKey && v.scriptPubKey.addresses) {
+            v.scriptPubKey.addresses.forEach(addr => {
+                await db.promise().query(
+                  "INSERT IGNORE INTO vouts (txid, n, address, value) VALUES (?, ?, ?, ?)",
+                  [txid, i, addr, v.value]
+                );
+            });
+        }
+    });
+}
 
       console.log("Synced block", height);
     }

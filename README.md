@@ -110,3 +110,8 @@ CREATE TABLE vouts (
   value DECIMAL(32,8),
   PRIMARY KEY(txid, n)
 );
+
+
+
+ConnectBlock: Consensus::CheckBlock: bad-version, rejected for avg fee protocol nVersion=1 block (code 17)
+2026-03-24 13:03:10 InvalidChainFound: invalid block=000072e428a5f5dc3173fc27a5ccd85c9dab13961a7d08140069149201b91150  height=0  log2_work=16.000022  date=2014-02-24 06:00:00

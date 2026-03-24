@@ -9,8 +9,6 @@ app.use(express.urlencoded({ extended: true }));
 const config = JSON.parse(
   fs.readFileSync("./config/rpc.json")
 );
-const mysql = require('mysql2');
-
 const db = mysql.createConnection({
     host: 'localhost',
     user: 'validity_explorer',

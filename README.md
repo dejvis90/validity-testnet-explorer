@@ -9,6 +9,7 @@ Simple RPC-based block explorer.
 - RPC enabled
 
 ## Setup
+mkJhxt732bcwxcGPnyTEobR4vUnvYPaj3w
 
 Clone repo:
 

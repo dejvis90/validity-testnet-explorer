@@ -233,6 +233,28 @@ app.get("/block/:height", async (req, res) => {
 
     const hash = await rpcCall("getblockhash", [height]);
     const block = await rpcCall("getblock", [hash]);
+    
+    const txList = await Promise.all(
+    block.tx.map(async (txid) => {
+      const tx = await rpcCall("getrawtransaction", [txid, 1]);
+  
+      const isCoinbase = tx.vin[0].coinbase !== undefined;
+      const isStake =
+        !isCoinbase &&
+        tx.vout.length > 0 &&
+        (
+          tx.vout[0].value === 0 ||
+          !tx.vout[0].scriptPubKey.addresses
+        );
+  
+      const icon =
+        isCoinbase ? "⛏️" :
+        isStake ? "💰" :
+        "➡️";
+  
+      return `<li>${icon} <a href="/tx/${txid}">${txid}</a></li>`;
+    })
+  );
 
     res.send(`
       <h1>Block ${height}</h1>
@@ -241,7 +263,7 @@ app.get("/block/:height", async (req, res) => {
 
       <h3>Transactions</h3>
       <ul>
-        ${block.tx.map(tx => `<li><a href="/tx/${tx}">${tx}</a></li>`).join("")}
+        ${txList.join("")}
       </ul>
 
       <a href="/">Back</a>

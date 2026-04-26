@@ -81,10 +81,30 @@ async function syncBlocks() {
       }
     }
   
-    // 🔴 STEP 2: insert transaction
+    const isCoinbase = txData.vin[0].coinbase !== undefined;
+
+    const isStake =
+      !isCoinbase &&
+      txData.vout.length > 0 &&
+      (
+        txData.vout[0].value === 0 ||
+        !txData.vout[0].scriptPubKey.addresses
+      );
+    
+    const type =
+      isCoinbase ? 1 :
+      isStake ? 2 :
+      0;
+    
     await db.promise().query(
-      "INSERT IGNORE INTO transactions (txid, blockheight, time, num_outputs) VALUES (?, ?, ?, ?)",
-      [txid, block.height, new Date(block.time * 1000), txData.vout.length]
+      "INSERT IGNORE INTO transactions (txid, blockheight, time, num_outputs, type) VALUES (?, ?, ?, ?, ?)",
+      [
+        txid,
+        block.height,
+        new Date(block.time * 1000),
+        txData.vout.length,
+        type
+      ]
     );
   
     // 🔴 STEP 3: insert outputs (new UTXOs)
@@ -226,35 +246,32 @@ app.post("/search", (req, res) => {
   res.redirect("/tx/" + req.body.query);
 });
 
-// Block page
 app.get("/block/:height", async (req, res) => {
   try {
     const height = parseInt(req.params.height);
 
     const hash = await rpcCall("getblockhash", [height]);
     const block = await rpcCall("getblock", [hash]);
-    
-    const txList = await Promise.all(
-    block.tx.map(async (txid) => {
-      const tx = await rpcCall("getrawtransaction", [txid, 1]);
-  
-      const isCoinbase = tx.vin[0].coinbase !== undefined;
-      const isStake =
-        !isCoinbase &&
-        tx.vout.length > 0 &&
-        (
-          tx.vout[0].value === 0 ||
-          !tx.vout[0].scriptPubKey.addresses
-        );
-  
+
+    // Fetch tx types from DB instead of RPC
+    const [txRows] = await db.promise().query(
+      "SELECT txid, type FROM transactions WHERE blockheight = ?",
+      [height]
+    );
+
+    const txMap = new Map();
+    txRows.forEach(t => txMap.set(t.txid, t.type));
+
+    const txList = block.tx.map(txid => {
+      const type = txMap.get(txid);
+
       const icon =
-        isCoinbase ? "⛏️" :
-        isStake ? "💰" :
+        type === 1 ? "⛏️" :
+        type === 2 ? "💰" :
         "➡️";
-  
+
       return `<li>${icon} <a href="/tx/${txid}">${txid}</a></li>`;
-    })
-  );
+    });
 
     res.send(`
       <h1>Block ${height}</h1>
@@ -268,6 +285,7 @@ app.get("/block/:height", async (req, res) => {
 
       <a href="/">Back</a>
     `);
+
   } catch (err) {
     console.error(err);
     res.send("Error loading block");

@@ -394,17 +394,24 @@ app.get("/tx/:txid", async (req, res) => {
       totalOut += vout.value;
     }
 
-    // Coinbase check
     const isCoinbase = tx.vin[0].coinbase !== undefined;
 
-    // Basic stake detection (may vary)
-    const isStake = tx.vin.length > 0 && !tx.vin[0].txid;
+    const isStake =
+      !isCoinbase &&
+      tx.vout.length > 0 &&
+      (
+        tx.vout[0].value === 0 ||
+        !tx.vout[0].scriptPubKey.addresses
+      );
 
     // Time (fallback if not in tx)
     const blockHash = tx.blockhash;
     const block = await rpcCall("getblock", [blockHash]);
     const time = new Date(block.time * 1000).toLocaleString();
-
+    const typeLabel =
+      isCoinbase ? "⛏️ Mined (Coinbase)" :
+      isStake ? "💰 Staked" :
+      "➡️ Transfer";
     res.send(`
       <h1>Transaction</h1>
 
@@ -412,12 +419,7 @@ app.get("/tx/:txid", async (req, res) => {
       <p><b>Amount:</b> ${totalOut}</p>
       <p><b>Confirmations:</b> ${confirmations}</p>
       <p><b>Date:</b> ${time}</p>
-      <p><b>Type:</b> ${
-        isCoinbase ? "Mined (Coinbase)" :
-        isStake ? "Staked" :
-        "Normal Transaction"
-      }</p>
-
+      <p><b>Type:</b> ${typeLabel}</p>
       <h3>Outputs</h3>
       <ul>
         ${tx.vout.map(v => `

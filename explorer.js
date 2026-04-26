@@ -322,10 +322,9 @@ app.get("/richlist", async (req, res) => {
     const [rows] = await db.promise().query(`
       SELECT address, SUM(value) as balance
       FROM vouts
+      WHERE spent = 0
       GROUP BY address
-      ORDER BY balance DESC
-      LIMIT 100
-    `);
+      ORDER BY balance DESC;
 
     // Build table HTML
     let html = "";

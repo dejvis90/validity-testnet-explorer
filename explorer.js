@@ -69,7 +69,37 @@ async function syncBlocks() {
 
      // Insert transactions and their outputs
     for (const txid of block.tx) {
-      const txData = await rpcCall("getrawtransaction", [txid, 1]);
+    const txData = await rpcCall("getrawtransaction", [txid, 1]);
+  
+    // 🔴 STEP 1: mark inputs as spent
+    for (const vin of txData.vin) {
+      if (vin.txid !== undefined) {
+        await db.promise().query(
+          "UPDATE vouts SET spent = 1 WHERE txid = ? AND n = ?",
+          [vin.txid, vin.vout]
+        );
+      }
+    }
+  
+    // 🔴 STEP 2: insert transaction
+    await db.promise().query(
+      "INSERT IGNORE INTO transactions (txid, blockheight, time, num_outputs) VALUES (?, ?, ?, ?)",
+      [txid, block.height, new Date(block.time * 1000), txData.vout.length]
+    );
+  
+    // 🔴 STEP 3: insert outputs (new UTXOs)
+    for (let i = 0; i < txData.vout.length; i++) {
+      const v = txData.vout[i];
+      if (v.scriptPubKey && v.scriptPubKey.addresses) {
+        for (const addr of v.scriptPubKey.addresses) {
+          await db.promise().query(
+            "INSERT IGNORE INTO vouts (txid, n, address, value) VALUES (?, ?, ?, ?)",
+            [txid, i, addr, v.value]
+          );
+        }
+      }
+    }
+  }
 
       // Insert transaction
       await db.promise().query(

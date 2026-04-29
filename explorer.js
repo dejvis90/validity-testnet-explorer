@@ -50,7 +50,6 @@ async function syncBlocks() {
       "SELECT MAX(height) as height FROM blocks"
     );
 
-    let lastHeight = rows[0].height || 0;
     // Optional: force full resync
     let lastHeight = 0;  // Uncomment to resync from genesis
     const chainHeight = await rpcCall("getblockcount");

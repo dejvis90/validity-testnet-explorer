@@ -67,60 +67,78 @@ async function syncBlocks() {
         [block.height, block.hash, new Date(block.time * 1000)]
       );
 
-     // Insert transactions and their outputs
     for (const txid of block.tx) {
-    const txData = await rpcCall("getrawtransaction", [txid, 1]);
-  
-    // 🔴 STEP 1: mark inputs as spent
-    for (const vin of txData.vin) {
-      if (vin.txid !== undefined) {
+  const txData = await rpcCall("getrawtransaction", [txid, 1]);
+
+  // 🔴 STEP 1: process inputs (read + store vins + mark spent)
+  for (const vin of txData.vin) {
+    if (vin.txid && vin.vout !== undefined) {
+
+      // 1️⃣ Read previous output BEFORE marking spent
+      const [rows] = await db.promise().query(
+        "SELECT address, value FROM vouts WHERE txid = ? AND n = ?",
+        [vin.txid, vin.vout]
+      );
+
+      if (rows.length) {
+        const { address, value } = rows[0];
+
+        // 2️⃣ Store vin (who spent what)
         await db.promise().query(
-          "UPDATE vouts SET spent = 1 WHERE txid = ? AND n = ?",
-          [vin.txid, vin.vout]
+          "INSERT INTO vins (txid, prev_txid, prev_n, address, value) VALUES (?, ?, ?, ?, ?)",
+          [txid, vin.txid, vin.vout, address, value]
         );
       }
-    }
-  
-    const isCoinbase = txData.vin[0].coinbase !== undefined;
 
-    const isStake =
-      !isCoinbase &&
-      txData.vout.length > 0 &&
-      (
-        txData.vout[0].value === 0 ||
-        !txData.vout[0].scriptPubKey.addresses
+      // 3️⃣ Mark as spent
+      await db.promise().query(
+        "UPDATE vouts SET spent = 1 WHERE txid = ? AND n = ?",
+        [vin.txid, vin.vout]
       );
-    
-    const type =
-      isCoinbase ? 1 :
-      isStake ? 2 :
-      0;
-    
-    await db.promise().query(
-      "INSERT IGNORE INTO transactions (txid, blockheight, time, num_outputs, type) VALUES (?, ?, ?, ?, ?)",
-      [
-        txid,
-        block.height,
-        new Date(block.time * 1000),
-        txData.vout.length,
-        type
-      ]
-    );
-  
-    // 🔴 STEP 3: insert outputs (new UTXOs)
-    for (let i = 0; i < txData.vout.length; i++) {
-      const v = txData.vout[i];
-      if (v.scriptPubKey && v.scriptPubKey.addresses) {
-        for (const addr of v.scriptPubKey.addresses) {
-          await db.promise().query(
-            "INSERT IGNORE INTO vouts (txid, n, address, value) VALUES (?, ?, ?, ?)",
-            [txid, i, addr, v.value]
-          );
-        }
-      }
     }
   }
 
+  // 🔴 STEP 2: detect type
+  const isCoinbase = txData.vin[0].coinbase !== undefined;
+
+  const isStake =
+    !isCoinbase &&
+    txData.vout.length > 0 &&
+    (
+      txData.vout[0].value === 0 ||
+      !txData.vout[0].scriptPubKey.addresses
+    );
+
+  const type =
+    isCoinbase ? 1 :
+    isStake ? 2 :
+    0;
+
+  // 🔴 STEP 3: insert transaction
+  await db.promise().query(
+    "INSERT IGNORE INTO transactions (txid, blockheight, time, num_outputs, type) VALUES (?, ?, ?, ?, ?)",
+    [
+      txid,
+      block.height,
+      new Date(block.time * 1000),
+      txData.vout.length,
+      type
+    ]
+  );
+
+  // 🔴 STEP 4: insert outputs
+  for (let i = 0; i < txData.vout.length; i++) {
+    const v = txData.vout[i];
+    if (v.scriptPubKey && v.scriptPubKey.addresses) {
+      for (const addr of v.scriptPubKey.addresses) {
+        await db.promise().query(
+          "INSERT IGNORE INTO vouts (txid, n, address, value) VALUES (?, ?, ?, ?)",
+          [txid, i, addr, v.value]
+        );
+      }
+    }
+  }
+}
       // Insert transaction
       await db.promise().query(
         "INSERT IGNORE INTO transactions (txid, blockheight, time, num_outputs) VALUES (?, ?, ?, ?)",

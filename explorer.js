@@ -43,15 +43,17 @@ async function rpcCall(method, params = []) {
 
   return response.data.result;
 }
-
+let isSyncing = false;
 async function syncBlocks() {
+  if (isSyncing) return;
+  isSyncing = true;
+
   try {
     const [rows] = await db.promise().query(
       "SELECT MAX(height) as height FROM blocks"
     );
-
-    // Optional: force full resync
-    let lastHeight = 0;  // Uncomment to resync from genesis
+    
+    let lastHeight = rows[0].height || 0;
     const chainHeight = await rpcCall("getblockcount");
 
     console.log(`Syncing from ${lastHeight + 1} to ${chainHeight}`);
@@ -144,7 +146,9 @@ async function syncBlocks() {
 
     console.log("Sync complete");
   } catch (err) {
-    console.error("Sync error:", err.message);
+  console.error("Sync error:", err.message);
+  } finally {
+    isSyncing = false;
   }
 }
 
@@ -361,8 +365,9 @@ app.get("/richlist", async (req, res) => {
       FROM vouts
       WHERE spent = 0
       GROUP BY address
-      ORDER BY balance DESC;
-
+      ORDER BY balance DESC
+      LIMIT 100
+    `);
     // Build table HTML
     let html = "";
     rows.forEach((row, index) => {
@@ -408,7 +413,7 @@ app.get("/tx/:txid", async (req, res) => {
   try {
     // Get block height
     const [rows] = await db.promise().query(
-      "SELECT blockheight FROM transactions WHERE txid = ?",
+      "SELECT blockheight, type FROM transactions WHERE txid = ?",
       [txid]
     );
 
@@ -445,9 +450,11 @@ app.get("/tx/:txid", async (req, res) => {
     const blockHash = tx.blockhash;
     const block = await rpcCall("getblock", [blockHash]);
     const time = new Date(block.time * 1000).toLocaleString();
+    const type = rows[0].type;
+
     const typeLabel =
-      isCoinbase ? "⛏️ Mined (Coinbase)" :
-      isStake ? "💰 Staked" :
+      type === 1 ? "⛏️ Mined (Coinbase)" :
+      type === 2 ? "💰 Staked" :
       "➡️ Transfer";
     res.send(`
       <h1>Transaction</h1>

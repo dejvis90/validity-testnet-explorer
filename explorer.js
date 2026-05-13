@@ -9,11 +9,13 @@ app.use(express.urlencoded({ extended: true }));
 const config = JSON.parse(
   fs.readFileSync("./config/rpc.json")
 );
+const coinbaseMaturity = config.coinbaseMaturity || 120;
 const db = mysql.createConnection({
-    host: 'localhost',
-    user: 'validity_explorer',
-    password: 'testnet',
-    database: 'validity_testnet_explorer'
+    host: config.dbhost || "localhost",
+    user: config.dbuser || "validity_explorer",
+    password: config.dbpassword || "testnet",
+    database: config.dbname || "validity_testnet_explorer",
+    port: config.dbport || 3306
 });
 
 db.connect(err => {
@@ -43,6 +45,23 @@ async function rpcCall(method, params = []) {
 
   return response.data.result;
 }
+
+async function getIndexedHeight() {
+  const [rows] = await db.promise().query(
+    "SELECT COALESCE(MAX(height), 0) as height FROM blocks"
+  );
+
+  return rows[0].height;
+}
+
+async function updateAddressBalance(address, amount) {
+  await db.promise().query(
+    `INSERT INTO addresses (address, balance) VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE balance = balance + VALUES(balance)`,
+    [address, amount]
+  );
+}
+
 let isSyncing = false;
 async function syncBlocks() {
   if (isSyncing) return;
@@ -77,7 +96,7 @@ async function syncBlocks() {
 
       // 1️⃣ Read previous output BEFORE marking spent
       const [rows] = await db.promise().query(
-        "SELECT address, value FROM vouts WHERE txid = ? AND n = ?",
+        "SELECT address, value FROM vouts WHERE txid = ? AND n = ? AND spent = 0",
         [vin.txid, vin.vout]
       );
 
@@ -89,13 +108,17 @@ async function syncBlocks() {
           "INSERT INTO vins (txid, prev_txid, prev_n, address, value) VALUES (?, ?, ?, ?, ?)",
           [txid, vin.txid, vin.vout, address, value]
         );
-      }
 
-      // 3️⃣ Mark as spent
-      await db.promise().query(
-        "UPDATE vouts SET spent = 1 WHERE txid = ? AND n = ?",
-        [vin.txid, vin.vout]
-      );
+        // 3️⃣ Mark as spent and update cached balance
+        const [spentResult] = await db.promise().query(
+          "UPDATE vouts SET spent = 1 WHERE txid = ? AND n = ? AND spent = 0",
+          [vin.txid, vin.vout]
+        );
+
+        if (spentResult.affectedRows) {
+          await updateAddressBalance(address, `-${value}`);
+        }
+      }
     }
   }
 
@@ -132,10 +155,14 @@ async function syncBlocks() {
     const v = txData.vout[i];
     if (v.scriptPubKey && v.scriptPubKey.addresses) {
       for (const addr of v.scriptPubKey.addresses) {
-        await db.promise().query(
+        const [insertResult] = await db.promise().query(
           "INSERT IGNORE INTO vouts (txid, n, address, value) VALUES (?, ?, ?, ?)",
           [txid, i, addr, v.value]
         );
+
+        if (insertResult.affectedRows) {
+          await updateAddressBalance(addr, v.value);
+        }
       }
     }
   }
@@ -297,16 +324,33 @@ app.get("/address/:address", async (req, res) => {
   const address = req.params.address;
 
   try {
-    // 1️⃣ Get all UTXOs for this address
-    const utxos = await rpcCall("listunspent", [0, 9999999, [address]]);
+    const currentHeight = await getIndexedHeight();
+    const immatureHeight = currentHeight - coinbaseMaturity + 1;
 
-    // Calculate balance
-    const balance = utxos.reduce((sum, utxo) => sum + utxo.amount, 0);
+    const [balanceRows] = await db.promise().query(
+      `SELECT
+         COALESCE(a.balance, 0) as totalBalance,
+         COALESCE(i.immatureBalance, 0) as immatureBalance,
+         COALESCE(a.balance, 0) - COALESCE(i.immatureBalance, 0) as balance
+       FROM (SELECT ? as address) requested
+       LEFT JOIN addresses a ON a.address = requested.address
+       LEFT JOIN (
+         SELECT v.address, SUM(v.value) as immatureBalance
+         FROM vouts v
+         JOIN transactions t ON v.txid = t.txid
+         WHERE v.address = ?
+           AND v.spent = 0
+           AND t.type IN (1, 2)
+           AND t.blockheight > ?
+         GROUP BY v.address
+       ) i ON i.address = requested.address`,
+      [address, address, immatureHeight]
+    );
+    const balance = balanceRows[0].balance;
+    const immatureBalance = balanceRows[0].immatureBalance;
 
-    // 2️⃣ Optionally, get all transactions involving this address from your DB
-    // This requires storing vouts/inputs in your DB during sync
     const [txRows] = await db.promise().query(
-      `SELECT t.txid, t.blockheight, t.time
+      `SELECT DISTINCT t.txid, t.blockheight, t.time
        FROM transactions t
        JOIN vouts v ON t.txid = v.txid
        WHERE v.address = ?
@@ -314,7 +358,6 @@ app.get("/address/:address", async (req, res) => {
       [address]
     );
 
-    // 3️⃣ Build HTML table for transactions
     let txHtml = "";
     for (const tx of txRows) {
       txHtml += `
@@ -326,7 +369,6 @@ app.get("/address/:address", async (req, res) => {
       `;
     }
 
-    // 4️⃣ Render page
     res.send(`
       <html>
       <head>
@@ -335,6 +377,7 @@ app.get("/address/:address", async (req, res) => {
       <body>
         <h1>Address: ${address}</h1>
         <p>Balance: ${balance} COIN</p>
+        <p>Immature mined/staked: ${immatureBalance} COIN</p>
 
         <h2>Transactions</h2>
         <table border="1" cellpadding="5">
@@ -359,15 +402,28 @@ app.get("/address/:address", async (req, res) => {
 
 app.get("/richlist", async (req, res) => {
   try {
-    // Aggregate balances per address
+    const currentHeight = await getIndexedHeight();
+    const immatureHeight = currentHeight - coinbaseMaturity + 1;
+
+    // Read cached address balances and subtract currently immature rewards.
     const [rows] = await db.promise().query(`
-      SELECT address, SUM(value) as balance
-      FROM vouts
-      WHERE spent = 0
-      GROUP BY address
+      SELECT
+        a.address,
+        a.balance - COALESCE(i.immatureBalance, 0) as balance
+      FROM addresses a
+      LEFT JOIN (
+        SELECT v.address, SUM(v.value) as immatureBalance
+        FROM vouts v
+        JOIN transactions t ON v.txid = t.txid
+        WHERE v.spent = 0
+          AND t.type IN (1, 2)
+          AND t.blockheight > ?
+        GROUP BY v.address
+      ) i ON i.address = a.address
+      WHERE a.balance - COALESCE(i.immatureBalance, 0) > 0
       ORDER BY balance DESC
       LIMIT 100
-    `);
+    `, [immatureHeight]);
     // Build table HTML
     let html = "";
     rows.forEach((row, index) => {

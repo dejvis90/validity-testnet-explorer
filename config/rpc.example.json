@@ -2,5 +2,11 @@
   "rpcuser": "rpcuser",
   "rpcpassword": "rpcpassword",
   "rpchost": "127.0.0.1",
-  "rpcport": 9332
+  "rpcport": 9332,
+  "coinbaseMaturity": 120,
+  "dbhost": "localhost",
+  "dbuser": "validity_explorer",
+  "dbpassword": "testnet",
+  "dbname": "validity_testnet_explorer",
+  "dbport": 3306
 }

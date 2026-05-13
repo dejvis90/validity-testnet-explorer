@@ -9,13 +9,31 @@ app.use(express.urlencoded({ extended: true }));
 const config = JSON.parse(
   fs.readFileSync("./config/rpc.json")
 );
+const requiredConfig = [
+  "rpcuser",
+  "rpcpassword",
+  "rpchost",
+  "rpcport",
+  "dbhost",
+  "dbuser",
+  "dbpassword",
+  "dbname",
+  "dbport"
+];
+
+for (const key of requiredConfig) {
+  if (config[key] === undefined || config[key] === "") {
+    throw new Error(`Missing required config value: ${key}`);
+  }
+}
+
 const coinbaseMaturity = config.coinbaseMaturity || 120;
 const db = mysql.createConnection({
-    host: config.dbhost || "localhost",
-    user: config.dbuser || "validity_explorer",
-    password: config.dbpassword || "testnet",
-    database: config.dbname || "validity_testnet_explorer",
-    port: config.dbport || 3306
+    host: config.dbhost,
+    user: config.dbuser,
+    password: config.dbpassword,
+    database: config.dbname,
+    port: config.dbport
 });
 
 db.connect(err => {

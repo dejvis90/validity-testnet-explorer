@@ -84,6 +84,19 @@ async function updateAddressBalance(address, amount, conn = db.promise()) {
   );
 }
 
+function formatCoin(value) {
+  return Number(value || 0).toFixed(8);
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 let isSyncing = false;
 
 async function rollbackBlock(height) {
@@ -435,47 +448,96 @@ app.get("/address/:address", async (req, res) => {
   const address = req.params.address;
 
   try {
-    const currentHeight = await getIndexedHeight();
-    const immatureHeight = currentHeight - coinbaseMaturity + 1;
+    const escapedAddress = escapeHtml(address);
 
-    const [balanceRows] = await db.promise().query(
+    const [[summary]] = await db.promise().query(
       `SELECT
-         COALESCE(a.balance, 0) as totalBalance,
-         COALESCE(i.immatureBalance, 0) as immatureBalance,
-         COALESCE(a.balance, 0) - COALESCE(i.immatureBalance, 0) as balance
+         COALESCE(a.balance, 0) as balance,
+         COALESCE(received.total, 0) as received,
+         COALESCE(sent.total, 0) as sent,
+         COALESCE(tx_counts.txcount, 0) as txcount
        FROM (SELECT ? as address) requested
        LEFT JOIN addresses a ON a.address = requested.address
        LEFT JOIN (
-         SELECT v.address, SUM(v.value) as immatureBalance
-         FROM vouts v
-         JOIN transactions t ON v.txid = t.txid
-         WHERE v.address = ?
-           AND v.spent = 0
-           AND t.type IN (1, 2)
-           AND t.blockheight > ?
-         GROUP BY v.address
-       ) i ON i.address = requested.address`,
-      [address, address, immatureHeight]
+         SELECT address, SUM(value) as total
+         FROM vouts
+         WHERE address = ?
+         GROUP BY address
+       ) received ON received.address = requested.address
+       LEFT JOIN (
+         SELECT address, SUM(value) as total
+         FROM vins
+         WHERE address = ?
+         GROUP BY address
+       ) sent ON sent.address = requested.address
+       LEFT JOIN (
+         SELECT address, COUNT(DISTINCT txid) as txcount
+         FROM (
+           SELECT address, txid FROM vouts WHERE address = ?
+           UNION
+           SELECT address, txid FROM vins WHERE address = ?
+         ) address_txs
+         GROUP BY address
+       ) tx_counts ON tx_counts.address = requested.address`,
+      [address, address, address, address, address]
     );
-    const balance = balanceRows[0].balance;
-    const immatureBalance = balanceRows[0].immatureBalance;
+
+    const [[rankRow]] = await db.promise().query(
+      `SELECT COUNT(*) + 1 as rank
+       FROM addresses
+       WHERE balance > ?`,
+      [summary.balance]
+    );
 
     const [txRows] = await db.promise().query(
-      `SELECT DISTINCT t.txid, t.blockheight, t.time
+      `SELECT
+         t.txid,
+         t.blockheight,
+         t.time,
+         t.type,
+         COALESCE(received.total, 0) as received,
+         COALESCE(sent.total, 0) as sent,
+         COALESCE(received.total, 0) - COALESCE(sent.total, 0) as amount
        FROM transactions t
-       JOIN vouts v ON t.txid = v.txid
-       WHERE v.address = ?
+       JOIN (
+         SELECT txid FROM vouts WHERE address = ?
+         UNION
+         SELECT txid FROM vins WHERE address = ?
+       ) address_txs ON address_txs.txid = t.txid
+       LEFT JOIN (
+         SELECT txid, SUM(value) as total
+         FROM vouts
+         WHERE address = ?
+         GROUP BY txid
+       ) received ON received.txid = t.txid
+       LEFT JOIN (
+         SELECT txid, SUM(value) as total
+         FROM vins
+         WHERE address = ?
+         GROUP BY txid
+       ) sent ON sent.txid = t.txid
        ORDER BY t.time DESC`,
-      [address]
+      [address, address, address, address]
     );
 
     let txHtml = "";
     for (const tx of txRows) {
+      const amount = Number(tx.amount || 0);
+      const typeLabel =
+        tx.type === 1 ? "Mined" :
+        tx.type === 2 ? "Staked" :
+        amount < 0 ? "Sent" :
+        "Received";
+
       txHtml += `
         <tr>
-          <td><a href="/tx/${tx.txid}">${tx.txid}</a></td>
+          <td><a href="/tx/${escapeHtml(tx.txid)}">${escapeHtml(tx.txid)}</a></td>
           <td>${tx.blockheight}</td>
           <td>${new Date(tx.time).toLocaleString()}</td>
+          <td>${typeLabel}</td>
+          <td class="coin">${formatCoin(tx.received)}</td>
+          <td class="coin">${formatCoin(tx.sent)}</td>
+          <td class="coin ${amount < 0 ? "negative" : "positive"}">${formatCoin(amount)}</td>
         </tr>
       `;
     }
@@ -486,18 +548,43 @@ app.get("/address/:address", async (req, res) => {
         <link rel="stylesheet" href="/style.css">
       </head>
       <body>
-        <h1>Address: ${address}</h1>
-        <p>Balance: ${balance} COIN</p>
-        <p>Immature mined/staked: ${immatureBalance} COIN</p>
+        <h1>Address ${escapedAddress}</h1>
+
+        <div class="summary-grid">
+          <div class="summary-item">
+            <span>Balance</span>
+            <strong>${formatCoin(summary.balance)} VAL</strong>
+          </div>
+          <div class="summary-item">
+            <span>Rich List</span>
+            <strong>#${rankRow.rank}</strong>
+          </div>
+          <div class="summary-item">
+            <span>Transactions</span>
+            <strong>${summary.txcount}</strong>
+          </div>
+          <div class="summary-item">
+            <span>Received</span>
+            <strong>${formatCoin(summary.received)} VAL</strong>
+          </div>
+          <div class="summary-item">
+            <span>Sent</span>
+            <strong>${formatCoin(summary.sent)} VAL</strong>
+          </div>
+        </div>
 
         <h2>Transactions</h2>
-        <table border="1" cellpadding="5">
+        <table>
           <tr>
             <th>TxID</th>
-            <th>Block Height</th>
+            <th>Block</th>
             <th>Time</th>
+            <th>Type</th>
+            <th>Received</th>
+            <th>Sent</th>
+            <th>Amount</th>
           </tr>
-          ${txHtml || "<tr><td colspan='3'>No transactions found</td></tr>"}
+          ${txHtml || "<tr><td colspan='7'>No transactions found</td></tr>"}
         </table>
 
         <a href="/">Back</a>
@@ -513,36 +600,30 @@ app.get("/address/:address", async (req, res) => {
 
 app.get("/richlist", async (req, res) => {
   try {
-    const currentHeight = await getIndexedHeight();
-    const immatureHeight = currentHeight - coinbaseMaturity + 1;
-
-    // Read cached address balances and subtract currently immature rewards.
     const [rows] = await db.promise().query(`
-      SELECT
-        a.address,
-        a.balance - COALESCE(i.immatureBalance, 0) as balance
-      FROM addresses a
-      LEFT JOIN (
-        SELECT v.address, SUM(v.value) as immatureBalance
-        FROM vouts v
-        JOIN transactions t ON v.txid = t.txid
-        WHERE v.spent = 0
-          AND t.type IN (1, 2)
-          AND t.blockheight > ?
-        GROUP BY v.address
-      ) i ON i.address = a.address
-      WHERE a.balance - COALESCE(i.immatureBalance, 0) > 0
+      SELECT address, balance
+      FROM addresses
+      WHERE balance > 0
       ORDER BY balance DESC
       LIMIT 100
-    `, [immatureHeight]);
+    `);
+
+    const [[summary]] = await db.promise().query(`
+      SELECT
+        COUNT(*) as addressCount,
+        COALESCE(SUM(balance), 0) as totalBalance
+      FROM addresses
+      WHERE balance > 0
+    `);
+
     // Build table HTML
     let html = "";
     rows.forEach((row, index) => {
       html += `
         <tr>
           <td>${index + 1}</td>
-          <td><a href="/address/${row.address}">${row.address}</a></td>
-          <td>${row.balance}</td>
+          <td><a href="/address/${escapeHtml(row.address)}">${escapeHtml(row.address)}</a></td>
+          <td class="coin">${formatCoin(row.balance)}</td>
         </tr>
       `;
     });
@@ -555,7 +636,18 @@ app.get("/richlist", async (req, res) => {
       </head>
       <body>
         <h1>Rich List (Top 100)</h1>
-        <table border="1" cellpadding="5">
+        <div class="summary-grid">
+          <div class="summary-item">
+            <span>Total Balance</span>
+            <strong>${formatCoin(summary.totalBalance)} VAL</strong>
+          </div>
+          <div class="summary-item">
+            <span>Addresses</span>
+            <strong>${summary.addressCount}</strong>
+          </div>
+        </div>
+
+        <table>
           <tr>
             <th>Rank</th>
             <th>Address</th>

@@ -28,18 +28,22 @@ for (const key of requiredConfig) {
 }
 
 const coinbaseMaturity = config.coinbaseMaturity || 120;
-const db = mysql.createConnection({
+const db = mysql.createPool({
     host: config.dbhost,
     user: config.dbuser,
     password: config.dbpassword,
     database: config.dbname,
-    port: config.dbport
+    port: config.dbport,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
 });
 
-db.connect(err => {
+db.getConnection((err, connection) => {
     if(err) {
         console.error('DB connection failed:', err);
     } else {
+        connection.release();
         console.log('Connected to MariaDB successfully.');
     }
 });
@@ -72,8 +76,8 @@ async function getIndexedHeight() {
   return rows[0].height;
 }
 
-async function updateAddressBalance(address, amount) {
-  await db.promise().query(
+async function updateAddressBalance(address, amount, conn = db.promise()) {
+  await conn.query(
     `INSERT INTO addresses (address, balance) VALUES (?, ?)
      ON DUPLICATE KEY UPDATE balance = balance + VALUES(balance)`,
     [address, amount]
@@ -81,16 +85,186 @@ async function updateAddressBalance(address, amount) {
 }
 
 let isSyncing = false;
+
+async function rollbackBlock(height) {
+  const conn = await db.promise().getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    const [txRows] = await conn.query(
+      "SELECT txid FROM transactions WHERE blockheight = ?",
+      [height]
+    );
+    const txids = txRows.map(row => row.txid);
+
+    if (txids.length) {
+      const [unspentOutputs] = await conn.query(
+        "SELECT address, value FROM vouts WHERE txid IN (?) AND spent = 0",
+        [txids]
+      );
+
+      for (const output of unspentOutputs) {
+        await updateAddressBalance(output.address, `-${output.value}`, conn);
+      }
+
+      const [restoredInputs] = await conn.query(
+        `SELECT vin.address, vin.value
+         FROM vins vin
+         JOIN transactions prev_t ON vin.prev_txid = prev_t.txid
+         WHERE vin.txid IN (?) AND prev_t.blockheight < ?`,
+        [txids, height]
+      );
+
+      await conn.query(
+        `UPDATE vouts prev_vout
+         JOIN vins vin
+           ON prev_vout.txid = vin.prev_txid
+          AND prev_vout.n = vin.prev_n
+         JOIN transactions prev_t ON vin.prev_txid = prev_t.txid
+         SET prev_vout.spent = 0
+         WHERE vin.txid IN (?) AND prev_t.blockheight < ?`,
+        [txids, height]
+      );
+
+      for (const input of restoredInputs) {
+        await updateAddressBalance(input.address, input.value, conn);
+      }
+
+      await conn.query("DELETE FROM vouts WHERE txid IN (?)", [txids]);
+      await conn.query("DELETE FROM vins WHERE txid IN (?)", [txids]);
+      await conn.query("DELETE FROM transactions WHERE txid IN (?)", [txids]);
+    }
+
+    await conn.query("DELETE FROM blocks WHERE height = ?", [height]);
+    await conn.commit();
+    console.log("Rolled back block", height);
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+async function rollbackReorgedTip() {
+  while (true) {
+    const [rows] = await db.promise().query(
+      "SELECT height, hash FROM blocks ORDER BY height DESC LIMIT 1"
+    );
+
+    if (!rows.length) return 0;
+
+    const { height, hash } = rows[0];
+    const chainHeight = await rpcCall("getblockcount");
+
+    if (height > chainHeight) {
+      await rollbackBlock(height);
+      continue;
+    }
+
+    const chainHash = await rpcCall("getblockhash", [height]);
+    if (chainHash === hash) return height;
+
+    await rollbackBlock(height);
+  }
+}
+
+async function indexBlock(block, txList) {
+  const conn = await db.promise().getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    for (const txData of txList) {
+      for (const vin of txData.vin) {
+        if (vin.txid && vin.vout !== undefined) {
+          const [rows] = await conn.query(
+            "SELECT address, value FROM vouts WHERE txid = ? AND n = ? AND spent = 0",
+            [vin.txid, vin.vout]
+          );
+
+          if (rows.length) {
+            const [spentResult] = await conn.query(
+              "UPDATE vouts SET spent = 1 WHERE txid = ? AND n = ? AND spent = 0",
+              [vin.txid, vin.vout]
+            );
+
+            if (spentResult.affectedRows) {
+              for (const row of rows) {
+                await conn.query(
+                  "INSERT INTO vins (txid, prev_txid, prev_n, address, value) VALUES (?, ?, ?, ?, ?)",
+                  [txData.txid, vin.txid, vin.vout, row.address, row.value]
+                );
+                await updateAddressBalance(row.address, `-${row.value}`, conn);
+              }
+            }
+          }
+        }
+      }
+
+      const isCoinbase = txData.vin[0].coinbase !== undefined;
+      const isStake =
+        !isCoinbase &&
+        txData.vout.length > 0 &&
+        (
+          txData.vout[0].value === 0 ||
+          !txData.vout[0].scriptPubKey.addresses
+        );
+
+      const type =
+        isCoinbase ? 1 :
+        isStake ? 2 :
+        0;
+
+      await conn.query(
+        "INSERT INTO transactions (txid, blockheight, time, num_outputs, type) VALUES (?, ?, ?, ?, ?)",
+        [
+          txData.txid,
+          block.height,
+          new Date(block.time * 1000),
+          txData.vout.length,
+          type
+        ]
+      );
+
+      for (let i = 0; i < txData.vout.length; i++) {
+        const v = txData.vout[i];
+        if (v.scriptPubKey && v.scriptPubKey.addresses) {
+          for (const addr of v.scriptPubKey.addresses) {
+            const [insertResult] = await conn.query(
+              "INSERT INTO vouts (txid, n, address, value) VALUES (?, ?, ?, ?)",
+              [txData.txid, i, addr, v.value]
+            );
+
+            if (insertResult.affectedRows) {
+              await updateAddressBalance(addr, v.value, conn);
+            }
+          }
+        }
+      }
+    }
+
+    await conn.query(
+      "INSERT INTO blocks (height, hash, time) VALUES (?, ?, ?)",
+      [block.height, block.hash, new Date(block.time * 1000)]
+    );
+
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
 async function syncBlocks() {
   if (isSyncing) return;
   isSyncing = true;
 
   try {
-    const [rows] = await db.promise().query(
-      "SELECT MAX(height) as height FROM blocks"
-    );
-    
-    let lastHeight = rows[0].height || 0;
+    const lastHeight = await rollbackReorgedTip();
     const chainHeight = await rpcCall("getblockcount");
 
     console.log(`Syncing from ${lastHeight + 1} to ${chainHeight}`);
@@ -98,94 +272,13 @@ async function syncBlocks() {
     for (let height = lastHeight + 1; height <= chainHeight; height++) {
       const blockHash = await rpcCall("getblockhash", [height]);
       const block = await rpcCall("getblock", [blockHash, true]);
+      const txList = [];
 
-      // Insert block
-      await db.promise().query(
-        "INSERT IGNORE INTO blocks (height, hash, time) VALUES (?, ?, ?)",
-        [block.height, block.hash, new Date(block.time * 1000)]
-      );
-
-    for (const txid of block.tx) {
-  const txData = await rpcCall("getrawtransaction", [txid, 1]);
-
-  // 🔴 STEP 1: process inputs (read + store vins + mark spent)
-  for (const vin of txData.vin) {
-    if (vin.txid && vin.vout !== undefined) {
-
-      // 1️⃣ Read previous output BEFORE marking spent
-      const [rows] = await db.promise().query(
-        "SELECT address, value FROM vouts WHERE txid = ? AND n = ? AND spent = 0",
-        [vin.txid, vin.vout]
-      );
-
-      if (rows.length) {
-        const { address, value } = rows[0];
-
-        // 2️⃣ Store vin (who spent what)
-        await db.promise().query(
-          "INSERT INTO vins (txid, prev_txid, prev_n, address, value) VALUES (?, ?, ?, ?, ?)",
-          [txid, vin.txid, vin.vout, address, value]
-        );
-
-        // 3️⃣ Mark as spent and update cached balance
-        const [spentResult] = await db.promise().query(
-          "UPDATE vouts SET spent = 1 WHERE txid = ? AND n = ? AND spent = 0",
-          [vin.txid, vin.vout]
-        );
-
-        if (spentResult.affectedRows) {
-          await updateAddressBalance(address, `-${value}`);
-        }
+      for (const txid of block.tx) {
+        txList.push(await rpcCall("getrawtransaction", [txid, 1]));
       }
-    }
-  }
 
-  // 🔴 STEP 2: detect type
-  const isCoinbase = txData.vin[0].coinbase !== undefined;
-
-  const isStake =
-    !isCoinbase &&
-    txData.vout.length > 0 &&
-    (
-      txData.vout[0].value === 0 ||
-      !txData.vout[0].scriptPubKey.addresses
-    );
-
-  const type =
-    isCoinbase ? 1 :
-    isStake ? 2 :
-    0;
-
-  // 🔴 STEP 3: insert transaction
-  await db.promise().query(
-    "INSERT IGNORE INTO transactions (txid, blockheight, time, num_outputs, type) VALUES (?, ?, ?, ?, ?)",
-    [
-      txid,
-      block.height,
-      new Date(block.time * 1000),
-      txData.vout.length,
-      type
-    ]
-  );
-
-  // 🔴 STEP 4: insert outputs
-  for (let i = 0; i < txData.vout.length; i++) {
-    const v = txData.vout[i];
-    if (v.scriptPubKey && v.scriptPubKey.addresses) {
-      for (const addr of v.scriptPubKey.addresses) {
-        const [insertResult] = await db.promise().query(
-          "INSERT IGNORE INTO vouts (txid, n, address, value) VALUES (?, ?, ?, ?)",
-          [txid, i, addr, v.value]
-        );
-
-        if (insertResult.affectedRows) {
-          await updateAddressBalance(addr, v.value);
-        }
-      }
-    }
-  }
-}
-     
+      await indexBlock(block, txList);
       console.log("Synced block", height);
     }
 

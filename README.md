@@ -95,7 +95,7 @@ CREATE TABLE vouts (
   address VARCHAR(128),
   value DECIMAL(32,8),
   spent TINYINT(1) DEFAULT 0,
-  PRIMARY KEY(txid, n)
+  PRIMARY KEY(txid, n, address)
 );
 
 CREATE TABLE vins (
@@ -174,6 +174,8 @@ http://localhost:3000
 
 The explorer syncs blocks every 10 seconds. On first run it starts from the first unsynced block in the `blocks` table.
 
+Each block is indexed inside one MariaDB transaction. The `blocks` row is inserted last, so a crash during block indexing will not mark a partial block as synced. On each sync pass, the explorer compares the indexed tip hash with the node tip at the same height and rolls back reorged tip blocks before continuing.
+
 ## Reset And Resync
 
 To rebuild the index from scratch, stop the explorer first, then run:
@@ -222,3 +224,4 @@ GROUP BY address;
 - Address and rich-list pages read balances from MariaDB, not from wallet RPC calls.
 - Rich-list and address balances exclude immature mined/staked outputs until `coinbaseMaturity` confirmations.
 - If balances look wrong after schema or sync-logic changes, do a full reset and resync.
+- If your old `vouts` table used `PRIMARY KEY(txid, n)`, recreate it with `PRIMARY KEY(txid, n, address)` before resyncing.

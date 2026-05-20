@@ -32,10 +32,6 @@ async function rpc(method, params = []) {
     }
   );
 
-  if (res.data.error) {
-    throw new Error(res.data.error.message || JSON.stringify(res.data.error));
-  }
-
   return res.data.result;
 }
 

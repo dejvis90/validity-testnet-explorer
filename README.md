@@ -137,9 +137,9 @@ Edit `config/rpc.json`:
   "rpcport": 9332,
   "coinbaseMaturity": 120,
   "dbhost": "localhost",
-  "dbuser": "validity_explorer",
-  "dbpassword": "testnet",
-  "dbname": "validity_testnet_explorer",
+  "dbuser": "username",
+  "dbpassword": "password",
+  "dbname": "db_name",
   "dbport": 3306
 }
 ```
